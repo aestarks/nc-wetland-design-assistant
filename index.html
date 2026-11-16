@@ -1,1 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NC Constructed Wetland Design Assistant | BIOE 434</title>
+  <!-- Leaflet & Leaflet Draw CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <h1>NC Constructed Stormwater Wetland Design Assistant</h1>
+      <p class="subtitle">Preliminary Ecological Engineering Sizing, Zone Layout &amp; Native Planting Tool</p>
+    </div>
+    <div class="header-actions no-print">
+      <button id="btn-equations" class="btn-secondary" type="button">View Equations &amp; Sources</button>
+      <button id="btn-print" class="btn-secondary" type="button" disabled>Print / Save PDF Summary</button>
+    </div>
+  </header>
 
+  <main class="workspace">
+    <!-- LEFT PANEL: Workflow Inputs -->
+    <section class="panel input-panel no-print">
+      <h2>1. Site &amp; Polygon Setup</h2>
+      <p class="hint">Zoom to your North Carolina site, then draw both polygons using the map tools.</p>
+
+      <div class="poly-controls">
+        <div class="poly-card" id="card-drainage">
+          <div class="poly-header">
+            <span class="badge blue">Drainage Area</span>
+            <button type="button" id="draw-drainage" class="btn-small">Draw Drainage</button>
+          </div>
+          <p class="poly-readout" id="drainage-readout">Not drawn yet</p>
+        </div>
+
+        <div class="poly-card" id="card-wetland">
+          <div class="poly-header">
+            <span class="badge green">Available Wetland Footprint</span>
+            <button type="button" id="draw-wetland" class="btn-small">Draw Wetland</button>
+          </div>
+          <p class="poly-readout" id="wetland-readout">Not drawn yet</p>
+        </div>
+
+        <button type="button" id="clear-polygons" class="btn-text">Clear Polygons</button>
+      </div>
+
+      <div id="location-box" class="info-box">
+        <strong>Detected NC Region:</strong> <span id="detected-region">Draw polygons to detect location</span><br />
+        <strong>Design Rainfall Depth ($P$):</strong> <span id="detected-rain">—</span>
+      </div>
+
+      <h2>2. Watershed Parameters</h2>
+      <form id="design-form">
+        <label for="storm-select">
+          Design Storm / Return Period
+          <select id="storm-select" required>
+            <option value="wq" selected>NC Water Quality Storm (1-yr / ~1.0–1.5 in event)</option>
+            <option value="1yr24">1-Year, 24-Hour Storm (NOAA Atlas 14)</option>
+            <option value="2yr24">2-Year, 24-Hour Storm (NOAA Atlas 14)</option>
+            <option value="10yr24">10-Year, 24-Hour Storm (NOAA Atlas 14)</option>
+          </select>
+        </label>
+
+        <label for="impervious-input">
+          Watershed Imperviousness (%)
+          <input type="number" id="impervious-input" min="0" max="100" step="1" value="45" required />
+        </label>
+
+        <label for="hsg-select">
+          Hydrologic Soil Group (HSG)
+          <select id="hsg-select" required>
+            <option value="A">Group A — High infiltration (Sand / Loamy Sand)</option>
+            <option value="B" selected>Group B — Moderate infiltration (Silt Loam / Loam)</option>
+            <option value="C">Group C — Slow infiltration (Sandy Clay Loam)</option>
+            <option value="D">Group D — Very slow infiltration (Clay / High Water Table)</option>
+            <option value="Unknown">Unknown (Conservative Soil &amp; Liner Check)</option>
+          </select>
+        </label>
+
+        <label for="drawdown-days">
+          Target Drawdown Time (Days, allowed: 2–5)
+          <input type="number" id="drawdown-days" min="1" max="10" step="0.5" value="3" required />
+        </label>
+
+        <div id="error-banner" class="error-banner hidden" role="alert"></div>
+
+        <button type="submit" id="btn-design" class="btn-primary">Design Wetland</button>
+      </form>
+    </section>
+
+    <!-- CENTER/RIGHT PANEL: Interactive Map + Results -->
+    <section class="content-area">
+      <div id="map-wrapper" class="no-print">
+        <div id="map"></div>
+      </div>
+
+      <!-- PRELIMINARY DESIGN OUTPUT -->
+      <div id="results-container" class="results-container hidden">
+        <div class="disclaimer-banner">
+          <strong>PRELIMINARY PLANNING TOOL ONLY:</strong> This output is for educational and preliminary feasibility assessment only and does <strong>not</strong> constitute a construction-ready engineering design. Final design requires a licensed PE site survey, geotechnical boring, groundwater table evaluation, and NC DEQ permitting.
+        </div>
+
+        <div class="results-header">
+          <h2>Preliminary Constructed Wetland Design Summary</h2>
+          <p id="summary-meta"></p>
+        </div>
+
+        <!-- Feasibility Status Banner -->
+        <div id="feasibility-banner" class="status-banner"></div>
+
+        <!-- Key Metrics Grid -->
+        <div class="metrics-grid" id="metrics-grid"></div>
+
+        <!-- Visual Zone Layout Diagram -->
+        <div class="card">
+          <h3>Conceptual Flow Path &amp; Zone Layout</h3>
+          <p class="hint">Recommended Length-to-Width Ratio: <strong>3:1</strong> (reduces short-circuiting from inlet forebay to outlet structure).</p>
+          <div id="conceptual-diagram" class="diagram-container"></div>
+        </div>
+
+        <!-- Zone Breakdown Table -->
+        <div class="card">
+          <h3>Wetland Hydrologic Zone Specifications</h3>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Wetland Zone</th>
+                <th>Target Share</th>
+                <th>Design Area (ft²)</th>
+                <th>Design Depth (Relative to Permanent Pool)</th>
+                <th>Zone Storage / Function</th>
+              </tr>
+            </thead>
+            <tbody id="zones-tbody"></tbody>
+          </table>
+        </div>
+
+        <!-- Design Criteria Pass/Fail Checklist -->
+        <div class="card">
+          <h3>BIOE 434 / NC Stormwater Design Criteria Check</h3>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Design Criterion</th>
+                <th>Required Standard</th>
+                <th>Calculated / Proposed Value</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="criteria-tbody"></tbody>
+          </table>
+        </div>
+
+        <!-- Soil, Liner & Outlet Engineering Guidance -->
+        <div class="two-col">
+          <div class="card">
+            <h3>Soil Preparation &amp; Liner Assessment</h3>
+            <div id="soil-guidance"></div>
+          </div>
+          <div class="card">
+            <h3>Inlet, Outlet &amp; Perimeter Slope Controls</h3>
+            <div id="outlet-guidance"></div>
+          </div>
+        </div>
+
+        <!-- Native Plant Recommendations -->
+        <div class="card">
+          <h3>North Carolina Native Planting Plan (Invasive Species &amp; Cattails Excluded)</h3>
+          <p id="planting-summary" class="hint"></p>
+          <div id="plant-recommendations"></div>
+        </div>
+
+        <!-- Construction & Maintenance Plan -->
+        <div class="card">
+          <h3>Construction &amp; Long-Term Maintenance Protocol</h3>
+          <ul class="checklist" id="maintenance-list"></ul>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- EQUATIONS & SOURCES MODAL -->
+  <div id="equations-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Equations, Design Rules &amp; Credible Sources</h2>
+        <button id="close-modal" class="btn-small" type="button">Close</button>
+      </div>
+      <div class="modal-body">
+        <h3>1. Runoff Volume (Simple Method — Schueler / NC DEQ Stormwater Design Manual)</h3>
+        <p><code>Rv = 0.05 + 0.009 × I</code> (where <code>I</code> is percent imperviousness, 0–100)</p>
+        <p><code>V_runoff (ft³) = (P / 12) × Rv × A_drainage (ft²)</code></p>
+
+        <h3>2. Wetland Surface Area &amp; Storage Sizing</h3>
+        <p>Maximum temporary ponding depth above permanent pool: <code>d_temp ≤ 15 in (1.25 ft)</code>.</p>
+        <p>Required wetland surface area at maximum ponding depth: <code>A_req (ft²) = V_runoff / 1.25 ft</code>.</p>
+        <p>Actual temporary ponding depth on proposed site: <code>d_actual (in) = (V_runoff / A_available) × 12</code>.</p>
+
+        <h3>3. Conceptual Geometry (3:1 Length-to-Width Ratio)</h3>
+        <p>To prevent hydraulic short-circuiting: <code>W = √(A_design / 3)</code>, <code>L = 3 × W</code>.</p>
+
+        <h3>4. Zone Allocation &amp; Depth Standards</h3>
+        <ul>
+          <li><strong>Forebay:</strong> 12.5% of surface area (target 10–15%), 24–40 in below permanent pool (design: 36 in).</li>
+          <li><strong>Non-Forebay Deep Pools:</strong> 10% of surface area (target 5–15%), ≥18 in below permanent pool (design: 24 in).</li>
+          <li><strong>Shallow-Water Zone:</strong> 40% of surface area (target 35–45%), 0–9 in below permanent pool (design: 6 in).</li>
+          <li><strong>Temporary-Inundation Zone:</strong> 37.5% of surface area (target 30–45%), 0–15 in above permanent pool.</li>
+        </ul>
+
+        <h3>5. Drawdown &amp; Planting Density</h3>
+        <ul>
+          <li><strong>Drawdown Time:</strong> Target 2–5 days (48–120 hours) via orifice/weir outlet control. Average outflow rate <code>Q_avg = V_runoff / (T_drawdown × 86,400)</code>.</li>
+          <li><strong>Shallow-Water Planting Density:</strong> Minimum 50 herbaceous plugs per 200 ft² (<code>0.25 plants/ft²</code>).</li>
+          <li><strong>Embankment / Fill Slopes:</strong> Non-clumping turf grass only (no trees or woody shrubs).</li>
+        </ul>
+
+        <h3>6. Data &amp; Regulatory Sources</h3>
+        <ul>
+          <li><strong>Rainfall Data:</strong> NOAA Atlas 14 Volume 2 (Precipitation-Frequency Atlas of the United States, North Carolina).</li>
+          <li><strong>Design Standards:</strong> NC Department of Environmental Quality (NC DEQ) Stormwater Design Manual — Chapter C-4 (Constructed Stormwater Wetlands).</li>
+          <li><strong>Plant &amp; Invasive Screening:</strong> NC State Extension Gardener Plant Toolbox &amp; NC Invasive Plant Council (NC-IPC).</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
